@@ -1,4 +1,8 @@
 
 resource "aws_s3_bucket" "homework_bucket" {
   bucket = "github-actions-homework-demo-2026-unique"
+
+  tags = {
+    Environment = "Homework"
+  }
 }
