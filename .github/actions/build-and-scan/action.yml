@@ -1,0 +1,74 @@
+
+name: Build, Push and Scan Image
+description: Build and push a Docker image to GHCR and scan it with Trivy
+
+inputs:
+  image_name:
+    description: Name of the image
+    required: true
+  tag:
+    description: Image tag
+    required: true
+  dockerfile:
+    description: Dockerfile path
+    required: false
+    default: Dockerfile
+  context:
+    description: Docker build context
+    required: false
+    default: .
+  build_args:
+    description: Optional Docker build arguments
+    required: false
+    default: ""
+
+outputs:
+  image_uri:
+    description: Full URI of the pushed image
+    value: ${{ steps.image.outputs.image_uri }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set image URI
+      id: image
+      shell: bash
+      env:
+        IMAGE_NAME: ${{ inputs.image_name }}
+        IMAGE_TAG: ${{ inputs.tag }}
+      run: |
+        IMAGE_URI="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_NAME}:${IMAGE_TAG}"
+        echo "image_uri=$IMAGE_URI" >> "$GITHUB_OUTPUT"
+
+    - name: Build Docker image
+      shell: bash
+      env:
+        IMAGE_URI: ${{ steps.image.outputs.image_uri }}
+        DOCKERFILE: ${{ inputs.dockerfile }}
+        CONTEXT: ${{ inputs.context }}
+        BUILD_ARGS: ${{ inputs.build_args }}
+      run: |
+        ARGS=()
+        if [[ -n "$BUILD_ARGS" ]]; then
+          read -r -a ARGS <<< "$BUILD_ARGS"
+        fi
+        docker build "${ARGS[@]}" -t "$IMAGE_URI" -f "$DOCKERFILE" "$CONTEXT"
+
+    - name: Push Docker image
+      shell: bash
+      env:
+        IMAGE_URI: ${{ steps.image.outputs.image_uri }}
+      run: docker push "$IMAGE_URI"
+
+    - name: Scan image with Trivy
+      uses: aquasecurity/trivy-action@0.36.0
+      with:
+        image-ref: ${{ steps.image.outputs.image_uri }}
+        format: sarif
+        output: trivy-results.sarif
+        severity: CRITICAL,HIGH
+
+    - name: Upload Trivy results
+      uses: github/codeql-action/upload-sarif@v4
+      with:
+        sarif_file: trivy-results.sarif
